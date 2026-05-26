@@ -1,2 +1,70 @@
 ---
-title: "Assignment 2: Pre"
+title: "Assignment 2"
+author: "Hunter Holt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(tidytext)
+library(glmnet)
+library(caret)
+library(Matrix)
+library(stopwords)
+set.seed(123)
+```
+
+```{r Load-Data}
+reviews <- read.csv("SoftwareReviews.csv")
+glimpse(reviews)
+```
+To begin, we use `set.seed(123)` for reproducible splitting and downstream randomness. This is standard within this report. We note that the dataset contains nine variables: `rating` (0 - 5), `title`, `text`, `images` (URL), `asin`, `parent_asin` (Amazon Standard Identification Number, an alphanumeric ten-digit code for identifying products), `user_id`, `helpful_vote` (a count of how many other users felt the review was helpful), and `verified_purchase` (a boolean used to signify whether the review followed a purchase, or was otherwise unprompted). Of these nine variables, the one we focus on is the `text` field, as it is already separated from metadata, which allows for our sparse matrix to be developed without too much additional parsing. The `title` field may prove useful moving forward, but to begin, we focus on the review body since it is methodologically cleaner to work with. 
+
+```{r Text-Prep}
+# Clean, tokenise
+reviews_tokens <- reviews |>
+  unnest_tokens(word, text) |>
+  anti_join(get_stopwords()) |>
+  filter(str_detect(word, "^[a-z']+$"))
+# Create dfm
+dfm <- reviews_clean |>
+  count(id, word) |>
+  cast_sparse(id, word, n)
+
+# Align response vector to dfm rows 
+y <- reviews$y
+```
+We essentially build a sparse document frequency matrix (DFM) to feed `glmnet`, which requires a numeric matrix and a numeric response.
+
+```{r Lasso-Fit}
+cv_fit <- cv.glmnet(x = x_train, y = y_train, alpha = 1, family = "gaussian", nfolds = 5)
+plot(cv_fit)
+best_lambda <- cv_fit$lambda.min
+lambda_1se <- cv_fit$lambda.1se
+best_lambda; lambda_1se
+```
+Here, we use Lasso regression, with an alpha = 1, and choose lambda.min (which produces the best cross-validation mean standard error) and lambda.1se (a more regularised, simpler model). `glmnet` will compute the regularisation path and cross-validation internally.
+```{r Predict-Eval}
+pred_min <- predict(cv_fit, newx = x_test, s = best_lambda)
+pred_1se <- predict(cv_fit, newx = x_test, s = lambda_1se)
+
+rmse <- function(obs, pred) sqrt(mean((obs - pred)^2))
+mae <- function(obs, pred) mean(abs(obs - pred))
+
+tibble(
+       model = c("lambda.min", "lambda.1se"),
+       RMSE = c(rmse(y_test, pred_min), rmse(y_test, pred_1se)),
+       MAE = c("mae(y_test, pred_min), mae(y_test, pred_1se))
+)
+```
+The `plot(cv_fit)` above shows cross-validation MSE against `log(lambda)`; below we include a scatter plot of predicted against actual ratings to inspect bias and variance.
+```{r Pred-Plot}
+pred_df <- tibble(actual = y_test, pred = as.numeric(pred_min))
+ggplot(pred_df, aes(x = actual, y = pred)) +
+  geom_jitter(width = 0.2, height = 0.2, alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(title = "Predicted vs Actual Ratings (lambda.min)", x = "Actual rating", y = "Predicted rating")
+```
+

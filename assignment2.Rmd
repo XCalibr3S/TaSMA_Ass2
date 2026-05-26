@@ -39,18 +39,29 @@ dfm <- reviews_tokens |>
   cast_sparse(id, word, n)
 
 # Align response vector to dfm rows 
-y <- reviews$y
+y <- reviews$y[as.numeric(rownames(dfm))]
 ```
 We essentially build a sparse document frequency matrix (DFM) to feed `glmnet`, which requires a numeric matrix and a numeric response.
 
 ```{r Lasso-Fit}
+trainIndex <- createDataPartition(y, p = 0.8, list = FALSE)
+x_train <- dfm[trainIndex, ]
+x_test <- dfm[-trainIndex, ]
+y_train <- y[trainIndex]
+y_test <- y[-trainIndex]
 cv_fit <- cv.glmnet(x = x_train, y = y_train, alpha = 1, family = "gaussian", nfolds = 5)
 plot(cv_fit)
 best_lambda <- cv_fit$lambda.min
 lambda_1se <- cv_fit$lambda.1se
 best_lambda; lambda_1se
 ```
-Here, we use Lasso regression, with an alpha = 1, and choose lambda.min (which produces the best cross-validation mean standard error) and lambda.1se (a more regularised, simpler model). `glmnet` will compute the regularisation path and cross-validation internally.
+Here, we use Lasso regression, with an alpha = 1, and choose lambda.min (which produces the best cross-validation mean standard error) and lambda.1se (a more regularised, simpler model). `glmnet` will compute the regularisation path and cross-validation internally. Essentially, the function `cv_fit <- cv.glmnet(...)` computes the regression model for a sequence of lambda values, evaluates each one using K-folds cross-validation, and returns `lambda.min` (the lambda that produces the lowest cross-validated error), as well as `lambda.1se` (the lambda that is within one standard error of the minimum). 
+
+The reason we have the both of these lambda values:
+
+- `lambda_min` provides the best predictive performance, whereas
+- `lambda_1se` provides a more interpretable, regularised model.
+
 ```{r Predict-Eval}
 pred_min <- predict(cv_fit, newx = x_test, s = best_lambda)
 pred_1se <- predict(cv_fit, newx = x_test, s = lambda_1se)
@@ -61,7 +72,7 @@ mae <- function(obs, pred) mean(abs(obs - pred))
 tibble(
        model = c("lambda.min", "lambda.1se"),
        RMSE = c(rmse(y_test, pred_min), rmse(y_test, pred_1se)),
-       MAE = c("mae(y_test, pred_min), mae(y_test, pred_1se))
+       MAE = c(mae(y_test, pred_min), mae(y_test, pred_1se))
 )
 ```
 The `plot(cv_fit)` above shows cross-validation MSE against `log(lambda)`; below we include a scatter plot of predicted against actual ratings to inspect bias and variance.

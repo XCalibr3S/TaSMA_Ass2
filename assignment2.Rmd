@@ -17,7 +17,12 @@ set.seed(123)
 ```
 
 ```{r Load-Data}
-reviews <- read.csv("SoftwareReviews.csv")
+reviews <- read.csv("SoftwareReviews.csv") |>
+  mutate(
+         id = row_number(),
+         y = rating,
+         text = as.character(text)
+  )
 glimpse(reviews)
 ```
 To begin, we use `set.seed(123)` for reproducible splitting and downstream randomness. This is standard within this report. We note that the dataset contains nine variables: `rating` (0 - 5), `title`, `text`, `images` (URL), `asin`, `parent_asin` (Amazon Standard Identification Number, an alphanumeric ten-digit code for identifying products), `user_id`, `helpful_vote` (a count of how many other users felt the review was helpful), and `verified_purchase` (a boolean used to signify whether the review followed a purchase, or was otherwise unprompted). Of these nine variables, the one we focus on is the `text` field, as it is already separated from metadata, which allows for our sparse matrix to be developed without too much additional parsing. The `title` field may prove useful moving forward, but to begin, we focus on the review body since it is methodologically cleaner to work with. 
@@ -29,7 +34,7 @@ reviews_tokens <- reviews |>
   anti_join(get_stopwords()) |>
   filter(str_detect(word, "^[a-z']+$"))
 # Create dfm
-dfm <- reviews_clean |>
+dfm <- reviews_tokens |>
   count(id, word) |>
   cast_sparse(id, word, n)
 
